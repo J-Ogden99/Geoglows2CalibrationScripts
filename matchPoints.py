@@ -1,6 +1,5 @@
-# from fuzzywuzzy import fuzz
 import math
-
+import time
 import geopandas as gpd
 import pandas as pd
 import numpy as np
@@ -18,6 +17,9 @@ buffer_distance = 50
 
 old_streams['nga_id'] = ''
 old_cpy = old_streams
+
+start_time = time.time()
+
 for idx, old_stream in old_streams.loc[~old_streams['gauge_id'].isna()].iterrows():
     old_geom = old_stream.geometry
     if old_geom.type == 'MultiLineString':
@@ -92,4 +94,15 @@ for idx, old_stream in old_streams.loc[~old_streams['gauge_id'].isna()].iterrows
     if closest_stream is not None:
         old_cpy.loc[old_cpy.index[idx], 'nga_id'] = str(closest_stream['LINKNO'])
 
-old_cpy.to_csv('assigned_gauges.csv')
+# End the timer
+end_time = time.time()
+
+# Calculate the elapsed time
+elapsed_time = end_time - start_time
+
+# Print the elapsed time
+print(f"Elapsed time: {elapsed_time} seconds")
+filtered_assigned = old_cpy.loc[old_cpy['nga_id'] != '']
+filtered_assigned['nga_id'] = filtered_assigned['nga_id'].astype(int)
+
+gpd.GeoDataFrame(filtered_assigned).to_file('assigned_gauges.gpkg')
