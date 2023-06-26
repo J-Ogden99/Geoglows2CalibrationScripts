@@ -44,9 +44,6 @@ for idx, old_stream in old_streams.loc[~old_streams['gauge_id'].isna()].iterrows
     #     intersecting_new_streams.intersects(buffer_gauge)]
     if intersecting_new_streams.empty:
         continue
-    # todo Make pivot table with number of occurrences of each stream order, use the one with maximum occurrences to
-    # todo determine which stream order will match the old river. There may be many order 1's so those should be
-    # todo filtered out unless there's only 1 or 2? Lots of conditional thinking needs to go into this.
     order_counts = intersecting_new_streams.groupby('strmOrder').agg(
         Count=('strmOrder', 'size')).sort_values('Count', ascending=False).reset_index()
     if not order_counts.empty:
