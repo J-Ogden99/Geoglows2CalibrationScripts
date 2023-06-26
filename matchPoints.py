@@ -3,6 +3,7 @@ import math
 
 import geopandas as gpd
 import pandas as pd
+import numpy as np
 from shapely.geometry import Point
 
 old_streams = gpd.read_file('central_america-geoglows-drainageline.gpkg')
@@ -19,6 +20,8 @@ old_streams['nga_id'] = ''
 old_cpy = old_streams
 for idx, old_stream in old_streams.loc[~old_streams['gauge_id'].isna()].iterrows():
     old_geom = old_stream.geometry
+    if old_geom.type == 'MultiLineString':
+        old_geom = old_geom.geoms[0]
     gauge_point = Point(
         gauge_filters.loc[
             gauge_filters['model_id'] == old_stream['COMID'], 'lon_gauge'
@@ -44,6 +47,9 @@ for idx, old_stream in old_streams.loc[~old_streams['gauge_id'].isna()].iterrows
     # todo filtered out unless there's only 1 or 2? Lots of conditional thinking needs to go into this.
     order_counts = intersecting_new_streams.groupby('strmOrder').agg(
         Count=('strmOrder', 'size')).sort_values('Count', ascending=False).reset_index()
+    if not order_counts.empty:
+        max_order = order_counts.loc[order_counts['strmOrder'] != 1, 'strmOrder'].iloc[0]
+        intersecting_new_streams = intersecting_new_streams.loc[intersecting_new_streams['strmOrder'] == max_order]
     closest_stream = None
     closest_distance = float('inf')
     angle_threshold = 20
@@ -58,14 +64,20 @@ for idx, old_stream in old_streams.loc[~old_streams['gauge_id'].isna()].iterrows
 
         # Check if the current higher stream has a closer distance and similar direction
         if distance < closest_distance:
+            print(distance)
             # Calculate the angle difference between the lower and higher stream
-            lower_vector = old_geom.coords[-1][0] - old_geom.coords[0][0], old_geom.coords[-1][1] - \
-                           old_geom.coords[0][1]
-            higher_vector = new_geom.coords[-1][0] - new_geom.coords[0][0], new_geom.coords[-1][
-                1] - new_geom.coords[0][1]
-            dot_product = lower_vector[0] * higher_vector[0] + lower_vector[1] * higher_vector[1]
-            magnitude_product = math.sqrt(lower_vector[0] ** 2 + lower_vector[1] ** 2) * math.sqrt(
-                higher_vector[0] ** 2 + higher_vector[1] ** 2)
+            lower_coords = np.array(old_geom.coords)
+            higher_coords = np.array(new_geom.coords)
+
+            # Calculate the vectors
+            lower_vector = lower_coords[-1] - lower_coords[0]
+            higher_vector = higher_coords[-1] - higher_coords[0]
+
+            # Calculate dot product and magnitude product
+            dot_product = np.dot(lower_vector, higher_vector)
+            magnitude_product = np.linalg.norm(lower_vector) * np.linalg.norm(higher_vector)
+
+            # Calculate the angle difference
             angle_difference = math.acos(dot_product / magnitude_product)
 
             # Convert angle difference to degrees
@@ -79,3 +91,5 @@ for idx, old_stream in old_streams.loc[~old_streams['gauge_id'].isna()].iterrows
     # Process the closest_stream if it exists
     if closest_stream is not None:
         old_cpy.loc[old_cpy.index[idx], 'nga_id'] = str(closest_stream['LINKNO'])
+
+old_cpy.to_csv('assigned_gauges.csv')
