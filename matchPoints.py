@@ -43,7 +43,7 @@ for idx, old_stream in old_streams.loc[~old_streams['gauge_id'].isna()].iterrows
     # todo determine which stream order will match the old river. There may be many order 1's so those should be
     # todo filtered out unless there's only 1 or 2? Lots of conditional thinking needs to go into this.
     order_counts = intersecting_new_streams.groupby('strmOrder').agg(
-        Count=('strmOrder', 'size')).reset_index().sort_values('Count', ascending=False)
+        Count=('strmOrder', 'size')).sort_values('Count', ascending=False).reset_index()
     closest_stream = None
     closest_distance = float('inf')
     angle_threshold = 20
