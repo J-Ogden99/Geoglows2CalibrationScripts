@@ -131,6 +131,8 @@ def match_new_to_old_rivers(old_drain,
         new_streams[[new_strmid, 'geometry']], left_on='nga_id', right_on=new_strmid).drop(new_strmid, axis=1)\
         .rename(columns={'geometry': 'nga_geom'})
 
+    for col in ['geoglows_id', 'nga_id']:
+        gauge_assignments[col] = gauge_assignments[col].astype(int)
     gauge_assignments.to_csv('gauge_assignments_extraattrs.csv')
     gauge_lookup = gauge_assignments[[gauge_siteid, 'geoglows_id', 'nga_id']]
     gauge_lookup.to_csv('gauge_lookup.csv')
