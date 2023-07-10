@@ -8,9 +8,10 @@ import pandas as pd
 from shapely.geometry import Point
 
 
-def match_new_to_old_rivers(old_drain,
-                            new_drain,
-                            old_matched,
+def match_new_to_old_rivers(old_drain: str,
+                            new_drain: str,
+                            old_matched: str,
+                            out_dir: str,
                             buffer_distance: int = 50,
                             old_strmid: str = 'COMID',
                             new_strmid: str = 'LINKNO',
@@ -22,6 +23,29 @@ def match_new_to_old_rivers(old_drain,
                             lat_col: str = 'lat_gauge',
                             lon_col: str = 'lon_gauge',
                             ):
+    """
+
+
+    Args:
+        old_drain (str): Path to GEOGloWS streams gpkg.
+        new_drain (str): Path to NGA streams gpkg.
+        old_matched (str): Path to .csv with gauge ids, assigned GEOGloWS ids, and lat lon of gauge locations.
+        out_dir (str): Directory to write outputs
+        buffer_distance (int, optional): Directly fed into buffer function. Defaults to 50.
+        old_strmid (str, optional): GEOGloWS unique river id. Defaults to 'COMID'.
+        new_strmid (str, optional): NGA unique river id. Defaults to 'LINKNO'.
+        gauge_strmid (str, optional): Name in old_matched for GEOGloWS id. Defaults to 'model_id'.
+        gauge_siteid (str, optional): Name for gauge id. Defaults to 'gauge_id'.
+        new_strmord (str, optional): Name for stream order column in new_drain. Defaults to 'strmOrder'.
+        old_us_area (str, optional): Name for upstream area in old_drain. Defaults to 'Tot_Drain_'.
+        new_us_area (str, optional): Name for upstream area in new_drain. Defaults to 'DSContArea'.
+        lat_col (str, optional): Name for latitude column in old_matched. Defaults to 'lat_gauge'.
+        lon_col (str, optional): Name for longitude column in old_matched. Defaults to 'lon_gauge'.
+
+    Returns:
+        pd.DataFrame: Dataframe with GEOGloWS river, matched NGA river, matched gauge, ratio of NGA area / GEOGloWS,
+                      and geometries for all three pieces
+    """
     old_streams = gpd.read_file(old_drain)
     new_streams = gpd.read_file(new_drain)
     gauge_filters = pd.read_csv(old_matched)
@@ -71,11 +95,14 @@ def match_new_to_old_rivers(old_drain,
         angle_threshold = 20
 
         # Iterate over the intersecting higher-resolution rivers
+        distances = {}
+        angles = {}
         for i, new_stream in intersecting_new_streams.iterrows():
             new_geom = new_stream.geometry
 
             # Calculate the distance between the lower and higher stream
             distance = gauge_geom.distance(new_geom).min()
+            distances[i] = distance
             # distance = old_geom.distance(new_geom)
 
             # Check if the current higher stream has a closer distance and similar direction
@@ -133,6 +160,8 @@ def match_new_to_old_rivers(old_drain,
 
     for col in ['geoglows_id', 'nga_id']:
         gauge_assignments[col] = gauge_assignments[col].astype(int)
+
+    os.chdir(out_dir)
     gauge_assignments.to_csv('gauge_assignments_extraattrs.csv')
     gauge_lookup = gauge_assignments[[gauge_siteid, 'geoglows_id', 'nga_id']]
     gauge_lookup.to_csv('gauge_lookup.csv')
@@ -142,5 +171,5 @@ if __name__ == "__main__":
     geoglows_drain = 'central_america-geoglows-drainageline.gpkg'
     nga_drain = 'TDX_streamnet_7020065090_01.gpkg'
     matched_geoglows = 'gauge_table_filters.csv'
-    match_new_to_old_rivers(geoglows_drain, nga_drain, matched_geoglows)
+    match_new_to_old_rivers(geoglows_drain, nga_drain, matched_geoglows, 'gauge_assignments')
 
