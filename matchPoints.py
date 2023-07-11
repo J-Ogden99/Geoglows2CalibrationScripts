@@ -1,16 +1,16 @@
+import math
 import os
 import time
 
 import geopandas as gpd
-import math
 import numpy as np
 import pandas as pd
 from shapely.geometry import Point
 
 
-def match_new_to_old_rivers(old_drain: str,
-                            new_drain: str,
-                            old_matched: str,
+def match_new_to_old_rivers(old_streams,
+                            new_streams,
+                            gauge_filters,
                             out_dir: str,
                             buffer_distance: int = 50,
                             old_strmid: str = 'COMID',
@@ -46,9 +46,9 @@ def match_new_to_old_rivers(old_drain: str,
         pd.DataFrame: Dataframe with GEOGloWS river, matched NGA river, matched gauge, ratio of NGA area / GEOGloWS,
                       and geometries for all three pieces
     """
-    old_streams = gpd.read_file(old_drain)
-    new_streams = gpd.read_file(new_drain)
-    gauge_filters = pd.read_csv(old_matched)
+    # old_streams = gpd.read_file(old_drain)
+    # new_streams = gpd.read_file(new_drain)
+    # gauge_filters = pd.read_csv(old_matched)
     old_streams = old_streams.merge(gauge_filters[[gauge_strmid, gauge_siteid]],
                                     how='inner', left_on=old_strmid, right_on=gauge_strmid)
 
@@ -92,21 +92,20 @@ def match_new_to_old_rivers(old_drain: str,
             intersecting_new_streams = intersecting_new_streams.loc[intersecting_new_streams[new_strmord] == max_order]
         closest_stream = None
         closest_distance = float('inf')
-        angle_threshold = 20
+        angle_threshold = 10
 
         # Iterate over the intersecting higher-resolution rivers
-        distances = {}
-        angles = {}
-        for i, new_stream in intersecting_new_streams.iterrows():
-            new_geom = new_stream.geometry
+        check_df = pd.DataFrame(columns=['river', 'distance', 'angle'])
+        if not intersecting_new_streams.empty:
+            for i, new_stream in intersecting_new_streams.iterrows():
+                new_geom = new_stream.geometry
 
-            # Calculate the distance between the lower and higher stream
-            distance = gauge_geom.distance(new_geom).min()
-            distances[i] = distance
-            # distance = old_geom.distance(new_geom)
+                # Calculate the distance between the lower and higher stream
+                distance = gauge_geom.distance(new_geom).min()
+                # distance = old_geom.distance(new_geom)
 
-            # Check if the current higher stream has a closer distance and similar direction
-            if distance < closest_distance:
+                # Check if the current higher stream has a closer distance and similar direction
+                # if distance < closest_distance:
                 # Calculate the angle difference between the lower and higher stream
                 lower_coords = np.array(old_geom.coords)
                 higher_coords = np.array(new_geom.coords)
@@ -124,17 +123,46 @@ def match_new_to_old_rivers(old_drain: str,
 
                 # Convert angle difference to degrees
                 angle_difference_degrees = 180 - math.degrees(angle_difference)
+                if check_df.empty:
+                    check_df = pd.DataFrame(data={
+                                   'river': new_stream[new_strmid],
+                                   'distance': distance,
+                                   'angle': angle_difference_degrees
+                               }, index=[i])
+                    continue
+                check_df = pd.concat([check_df,
+                                      pd.DataFrame({
+                                          'river': new_stream[new_strmid],
+                                          'distance': distance,
+                                          'angle': angle_difference_degrees
+                                      }, index=[i])], axis=0)
+
 
                 # Adjust the angle threshold as needed
-                if angle_difference_degrees < angle_threshold:
-                    closest_stream = new_stream
-                    closest_distance = distance
+                # if angle_difference_degrees < angle_threshold:
+                #         closest_stream = new_stream
+                #         closest_distance = distance
+            closest_distance = check_df['distance'].min()
+            min_angle = check_df['angle'].min()
+            closest_stream = intersecting_new_streams.loc[intersecting_new_streams[new_strmid] == check_df.loc[
+                        check_df['distance'] == closest_distance, 'river'].values[0]]
+            while True:
+                if ((check_df.loc[
+                         check_df['distance'] == closest_distance, 'angle'] - min_angle) > angle_threshold).values[0]:
+                    if check_df.shape[0] <= 1:
+                        break
+                    check_df = check_df.loc[check_df['distance'] != closest_distance]
+                    closest_distance = check_df['distance'].min()
+                    closest_stream = intersecting_new_streams.loc[intersecting_new_streams[new_strmid] == check_df.loc[
+                        check_df['distance'] == closest_distance, 'river'].values[0]]
+                    continue
+                break
 
         # Process the closest_stream if it exists
         if closest_stream is not None:
-            old_cpy.loc[old_cpy.index[idx], 'nga_id'] = str(closest_stream[new_strmid])
+            old_cpy.loc[old_cpy.index[idx], 'nga_id'] = closest_stream[new_strmid].astype(str).values[0]
             old_cpy.loc[old_cpy.index[idx], 'area_ratio'] = \
-                closest_stream[new_us_area] / old_cpy.loc[old_cpy.index[idx], old_us_area]
+                (closest_stream.loc[:, new_us_area] / old_cpy.loc[old_cpy.index[idx], old_us_area]).values[0]
 
 
     # End the timer
@@ -167,9 +195,13 @@ def match_new_to_old_rivers(old_drain: str,
     gauge_lookup.to_csv('gauge_lookup.csv')
     return gauge_assignments
 
+
 if __name__ == "__main__":
     geoglows_drain = 'central_america-geoglows-drainageline.gpkg'
     nga_drain = 'TDX_streamnet_7020065090_01.gpkg'
     matched_geoglows = 'gauge_table_filters.csv'
-    match_new_to_old_rivers(geoglows_drain, nga_drain, matched_geoglows, 'gauge_assignments')
+    old_streams = gpd.read_file(geoglows_drain)
+    new_streams = gpd.read_file(nga_drain)
+    gauge_filters = pd.read_csv(matched_geoglows)
+    match_new_to_old_rivers(old_streams, new_streams, gauge_filters, 'gauge_assignments')
 
