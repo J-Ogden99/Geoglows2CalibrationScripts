@@ -11,7 +11,7 @@ from shapely.geometry import Point
 def match_new_to_old_rivers(old_streams,
                             new_streams,
                             gauge_filters,
-                            out_dir: str,
+                            out_dir: str = None,
                             buffer_distance: int = 50,
                             old_strmid: str = 'COMID',
                             new_strmid: str = 'LINKNO',
@@ -22,15 +22,16 @@ def match_new_to_old_rivers(old_streams,
                             new_us_area: str = 'DSContArea',
                             lat_col: str = 'lat_gauge',
                             lon_col: str = 'lon_gauge',
+                            filter_strmord: bool = True
                             ):
     """
 
 
     Args:
-        old_drain (str): Path to GEOGloWS streams gpkg.
-        new_drain (str): Path to NGA streams gpkg.
-        old_matched (str): Path to .csv with gauge ids, assigned GEOGloWS ids, and lat lon of gauge locations.
-        out_dir (str): Directory to write outputs
+        old_streams (DataFrame-like): DataFrame of GEOGloWS streams.
+        new_streams (DataFrame-like): DataFrame of NGA streams.
+        gauge_filters (DataFrame-like): DataFrame with gauge ids, assigned GEOGloWS ids, and lat lon of gauge locations.
+        out_dir (str, optional): Directory to write outputs. If None, won't write. Defaults to None.
         buffer_distance (int, optional): Directly fed into buffer function. Defaults to 50.
         old_strmid (str, optional): GEOGloWS unique river id. Defaults to 'COMID'.
         new_strmid (str, optional): NGA unique river id. Defaults to 'LINKNO'.
@@ -41,6 +42,8 @@ def match_new_to_old_rivers(old_streams,
         new_us_area (str, optional): Name for upstream area in new_drain. Defaults to 'DSContArea'.
         lat_col (str, optional): Name for latitude column in old_matched. Defaults to 'lat_gauge'.
         lon_col (str, optional): Name for longitude column in old_matched. Defaults to 'lon_gauge'.
+        filter_strmord (bool, optional): Determines whether to filter by stream order. Set to False
+                                         if no stream order column is available in new_streams. Defaults to True.
 
     Returns:
         pd.DataFrame: Dataframe with GEOGloWS river, matched NGA river, matched gauge, ratio of NGA area / GEOGloWS,
@@ -85,11 +88,12 @@ def match_new_to_old_rivers(old_streams,
         #     intersecting_new_streams.intersects(buffer_gauge)]
         if intersecting_new_streams.empty:
             continue
-        order_counts = intersecting_new_streams.groupby(new_strmord).agg(
-            Count=(new_strmord, 'size')).sort_values('Count', ascending=False).reset_index()
-        if not order_counts.empty:
-            max_order = order_counts.loc[order_counts[new_strmord] != 1, new_strmord].iloc[0]
-            intersecting_new_streams = intersecting_new_streams.loc[intersecting_new_streams[new_strmord] == max_order]
+        if filter_strmord:
+            order_counts = intersecting_new_streams.groupby(new_strmord).agg(
+                Count=(new_strmord, 'size')).sort_values('Count', ascending=False).reset_index()
+            if not order_counts.empty:
+                max_order = order_counts.loc[order_counts[new_strmord] != 1, new_strmord].iloc[0]
+                intersecting_new_streams = intersecting_new_streams.loc[intersecting_new_streams[new_strmord] == max_order]
         closest_stream = None
         closest_distance = float('inf')
         angle_threshold = 10
@@ -99,6 +103,8 @@ def match_new_to_old_rivers(old_streams,
         if not intersecting_new_streams.empty:
             for i, new_stream in intersecting_new_streams.iterrows():
                 new_geom = new_stream.geometry
+                if new_geom.geom_type == 'MultiLineString':
+                    new_geom = new_geom.geoms[0]  # may not be enough
 
                 # Calculate the distance between the lower and higher stream
                 distance = gauge_geom.distance(new_geom).min()
@@ -153,8 +159,10 @@ def match_new_to_old_rivers(old_streams,
                         break
                     check_df = check_df.loc[check_df['distance'] != closest_distance]
                     closest_distance = check_df['distance'].min()
-                    closest_stream = intersecting_new_streams.loc[intersecting_new_streams[new_strmid] == check_df.loc[
-                        check_df['distance'] == closest_distance, 'river'].values[0]]
+                    if check_df.loc[check_df['distance'] == closest_distance, 'river'].shape[0] == 0:
+                        closest_stream = intersecting_new_streams.loc[
+                            intersecting_new_streams[new_strmid] == check_df.loc[
+                                check_df['distance'] == closest_distance, 'river'].values[0]]
                     continue
                 break
 
@@ -189,10 +197,11 @@ def match_new_to_old_rivers(old_streams,
     for col in ['geoglows_id', 'nga_id']:
         gauge_assignments[col] = gauge_assignments[col].astype(int)
 
-    os.chdir(out_dir)
-    gauge_assignments.to_csv('gauge_assignments_extraattrs.csv')
-    gauge_lookup = gauge_assignments[[gauge_siteid, 'geoglows_id', 'nga_id']]
-    gauge_lookup.to_csv('gauge_lookup.csv')
+    if out_dir:
+        os.chdir(out_dir)
+        gauge_assignments.to_csv('gauge_assignments_extraattrs.csv')
+        gauge_lookup = gauge_assignments[[gauge_siteid, 'geoglows_id', 'nga_id']]
+        gauge_lookup.to_csv('gauge_lookup.csv')
     return gauge_assignments
 
 
