@@ -159,7 +159,7 @@ def match_new_to_old_rivers(old_streams,
                         break
                     check_df = check_df.loc[check_df['distance'] != closest_distance]
                     closest_distance = check_df['distance'].min()
-                    if check_df.loc[check_df['distance'] == closest_distance, 'river'].shape[0] == 0:
+                    if check_df.loc[check_df['distance'] == closest_distance, 'river'].shape[0] != 0:
                         closest_stream = intersecting_new_streams.loc[
                             intersecting_new_streams[new_strmid] == check_df.loc[
                                 check_df['distance'] == closest_distance, 'river'].values[0]]
