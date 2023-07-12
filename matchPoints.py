@@ -54,6 +54,9 @@ def match_new_to_old_rivers(old_streams,
     # gauge_filters = pd.read_csv(old_matched)
     old_streams = old_streams.merge(gauge_filters[[gauge_strmid, gauge_siteid]],
                                     how='inner', left_on=old_strmid, right_on=gauge_strmid)
+    if old_streams.empty:
+        print('No gauges assigned to region')
+        return None
 
     new_streams = new_streams.to_crs(old_streams.crs)
 

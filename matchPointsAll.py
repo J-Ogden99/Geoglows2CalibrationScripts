@@ -40,8 +40,10 @@ for geoglows in glob('geoglows/*/*.shp'):
         if out_tbl.empty:
             out_tbl = match_new_to_old_rivers(df, nga, gauge_table, new_strmid='TDXHydroLinkNo')
         else:
-            out_tbl = pd.concat([out_tbl, match_new_to_old_rivers(df, nga, gauge_table, new_strmid='TDXHydroLinkNo')],
-                                axis=0).reset_index(drop=True)
+            assigned = match_new_to_old_rivers(df, nga, gauge_table, new_strmid='TDXHydroLinkNo')
+            if assigned is not None:
+                out_tbl = pd.concat([out_tbl, ],
+                                    axis=0).reset_index(drop=True)
             print(out_tbl)
         out_tbl.to_csv('gauge_assignments/whole_world_gauge_assign.csv')
     del df
