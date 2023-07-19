@@ -5,7 +5,9 @@ import time
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from shapely.geometry import Point
+from shapely.geometry import Point, MultiPoint
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.model_selection import train_test_split
 
 
 def match_new_to_old_rivers(old_streams,
@@ -211,12 +213,48 @@ def match_new_to_old_rivers(old_streams,
     return gauge_assignments
 
 
+def match_rivers_to_gauges(drain: gpd.GeoDataFramev, new_gauges: pd.DataFrame) -> pd.DataFrame:
+    new_gauges['nga_id'] = ''
+    for i in range(len(new_gauges)):
+        gauge = new_gauges.iloc[i]
+        gauge_geom = Point(gauge['lon_gauge'], gauge['lat_gauge'])
+        drain['distance'] = drain.distance(gauge_geom)
+        nearest_rivs = drain.loc[drain['strmOrder'] != 1].sort_values(by='distance').head(10)
+        dist_wt = 1
+        mag_wt = 0
+        strm_order_wt = 0.1
+        order_counts = nearest_rivs.groupby('strmOrder').agg(
+            Count=('strmOrder', 'size')).sort_values('Count', ascending=False).reset_index()
+        if not order_counts.empty:
+            max_order = order_counts.loc[order_counts['strmOrder'] != 1, 'strmOrder'].iloc[0]
+        # Try strmOrder * # of occurences of that stream order? or 0 if it's 1? or just the number of occurences of the stream order without multplying the number?
+        nearest_rivs['score'] = nearest_rivs['strmOrder'].apply(
+            lambda x: order_counts.loc[order_counts['strmOrder'] == x, 'Count'].values[0]) + \
+                                nearest_rivs['Magnitude'] * mag_wt + dist_wt / nearest_rivs['distance']
+        nearest_riv = nearest_rivs.loc[nearest_rivs['score'] == nearest_rivs['score'].max()]
+
+        new_gauges.loc[new_gauges.index[i], 'nga_id'] = nearest_riv['TDXHydroLinkNo']
+        # if (nearest_riv['TDXHydroLinkNo'] != gauge['nga_id']).iloc[0]:
+        #     changed_count += 1
+        #     gauge['nga_id'] = nearest_riv['TDXHydroLinkNo'].values[0]
+        #     gauge = gauge.to_frame().T
+        #     if changed_df.empty:
+        #         changed_df = gauge
+        #     else:
+        #         changed_df = pd.concat([changed_df, gauge], axis=0).reset_index(drop=True)
+    return new_gauges
+
+
+corrected_dr_gaugestbl = 'gauge_assignments/corrected_dr_gauges.csv'
+
 if __name__ == "__main__":
     geoglows_drain = 'central_america-geoglows-drainageline.gpkg'
     nga_drain = 'TDX_streamnet_7020065090_01.gpkg'
+    nga_drain_dr = 'tdxhydro/vpu_700/vpu_718_streams.gpkg'
     matched_geoglows = 'gauge_table_filters.csv'
-    old_streams = gpd.read_file(geoglows_drain)
-    new_streams = gpd.read_file(nga_drain)
-    gauge_filters = pd.read_csv(matched_geoglows)
-    match_new_to_old_rivers(old_streams, new_streams, gauge_filters, 'gauge_assignments')
-
+    # old_streams = gpd.read_file(geoglows_drain)
+    gauge_assignments = pd.read_csv(corrected_dr_gaugestbl, index_col=0)
+    dr_streams = gpd.read_file(nga_drain_dr)
+    # gauge_filters = pd.read_csv(matched_geoglows)
+    # match_new_to_old_rivers(old_streams, new_streams, gauge_filters, 'gauge_assignments')
+    match_rivers_to_gauges(dr_streams, gauge_assignments)
