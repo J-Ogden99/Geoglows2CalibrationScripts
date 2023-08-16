@@ -213,30 +213,56 @@ def match_new_to_old_rivers(old_streams,
     return gauge_assignments
 
 
-def match_rivers_to_gauges(drain: gpd.GeoDataFramev, new_gauges: pd.DataFrame) -> pd.DataFrame:
+def match_rivers_to_gauges(drain: gpd.GeoDataFramev, new_gauges: pd.DataFrame,
+                           new_strm_id = 'TDXHydroLinkNo',
+                           new_strm_ord = 'strmOrder',
+                           magnitude_col = 'Magnitude',
+                           dist_wt = 1,
+                           mag_wt = 0,
+                           lat_col = 'lat_gauge',
+                           lon_col = 'lon_gauge',
+                           ) -> pd.DataFrame:
+    """
+    Matches rivers directly to gauges by scoring rivers in the vicinity of a gauge based
+    on distance, number of other rivers of common stream order in that vicinity, and magnitude
+    (though that is weighted zero by default)
+
+    Args:
+        drain (gpd.GeoDataFramev): Drainage network
+        new_gauges (pd.DataFrame): Gauges with an id, lat, and lon column (though id isn't directly used)
+        new_strm_id (str, optional): Column name for the stream ID from drain. Defaults to 'TDXHydroLinkNo'.
+        new_strm_ord (str, optional): Column name for the stream order from drain. Defaults to 'strmOrder'.
+        magnitude_col (str, optional): Column name for the magnitude (shreve stream order). Defaults to 'Magnitude'.
+        dist_wt (int, optional): Amount to emphasize inverse distance of river to gauge for scoring.
+                                 Should combine with mag_wt to add up to 1. Defaults to 1.
+        mag_wt (int, optional): Amount to emphasize magnitude of river in scoring. Defaults to 0.
+        lat_col (str, optional): Name of latitude column from new_gauges. Defaults to 'lat_gauge'.
+        lon_col (str, optional): Name of longitude column from new_gauges. Defaults to 'lon_gauge'.
+
+    Returns:
+        pd.DataFrame: A version of the new_gauges dataframe with an nga_id column that contains the
+                      assigned IDs from drain.
+    """
     new_gauges['nga_id'] = ''
     for i in range(len(new_gauges)):
         gauge = new_gauges.iloc[i]
-        gauge_geom = Point(gauge['lon_gauge'], gauge['lat_gauge'])
+        gauge_geom = Point(gauge[lon_col], gauge[lat_col])
         drain['distance'] = drain.distance(gauge_geom)
-        nearest_rivs = drain.loc[drain['strmOrder'] != 1].sort_values(by='distance').head(10)
-        dist_wt = 1
-        mag_wt = 0
-        strm_order_wt = 0.1
-        order_counts = nearest_rivs.groupby('strmOrder').agg(
-            Count=('strmOrder', 'size')).sort_values('Count', ascending=False).reset_index()
+        nearest_rivs = drain.loc[drain[new_strm_ord] != 1].sort_values(by='distance').head(10)
+        order_counts = nearest_rivs.groupby(new_strm_ord).agg(
+            Count=(new_strm_ord, 'size')).sort_values('Count', ascending=False).reset_index()
         if not order_counts.empty:
-            max_order = order_counts.loc[order_counts['strmOrder'] != 1, 'strmOrder'].iloc[0]
+            max_order = order_counts.loc[order_counts[new_strm_ord] != 1, new_strm_ord].iloc[0]
         # Try strmOrder * # of occurences of that stream order? or 0 if it's 1? or just the number of occurences of the stream order without multplying the number?
-        nearest_rivs['score'] = nearest_rivs['strmOrder'].apply(
-            lambda x: order_counts.loc[order_counts['strmOrder'] == x, 'Count'].values[0]) + \
-                                nearest_rivs['Magnitude'] * mag_wt + dist_wt / nearest_rivs['distance']
+        nearest_rivs['score'] = nearest_rivs[new_strm_ord].apply(
+            lambda x: order_counts.loc[order_counts[new_strm_ord] == x, 'Count'].values[0]) + \
+                                nearest_rivs[magnitude_col] * mag_wt + dist_wt / nearest_rivs['distance']
         nearest_riv = nearest_rivs.loc[nearest_rivs['score'] == nearest_rivs['score'].max()]
 
-        new_gauges.loc[new_gauges.index[i], 'nga_id'] = nearest_riv['TDXHydroLinkNo']
-        # if (nearest_riv['TDXHydroLinkNo'] != gauge['nga_id']).iloc[0]:
+        new_gauges.loc[new_gauges.index[i], 'nga_id'] = nearest_riv[new_strm_id]
+        # if (nearest_riv[new_strm_id] != gauge['nga_id']).iloc[0]:
         #     changed_count += 1
-        #     gauge['nga_id'] = nearest_riv['TDXHydroLinkNo'].values[0]
+        #     gauge['nga_id'] = nearest_riv[new_strm_id].values[0]
         #     gauge = gauge.to_frame().T
         #     if changed_df.empty:
         #         changed_df = gauge
