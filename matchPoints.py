@@ -1,13 +1,14 @@
 import math
 import os
 import time
+import warnings
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from shapely.geometry import Point, MultiPoint
-from sklearn.cluster import AgglomerativeClustering
-from sklearn.model_selection import train_test_split
+from shapely.geometry import Point
+
+warnings.filterwarnings('ignore')
 
 
 def match_new_to_old_rivers(old_streams,
@@ -213,7 +214,7 @@ def match_new_to_old_rivers(old_streams,
     return gauge_assignments
 
 
-def match_rivers_to_gauges(drain: gpd.GeoDataFramev, new_gauges: pd.DataFrame,
+def match_rivers_to_gauges(drain: gpd.GeoDataFrame, new_gauges: pd.DataFrame,
                            new_strm_id = 'TDXHydroLinkNo',
                            new_strm_ord = 'strmOrder',
                            magnitude_col = 'Magnitude',
@@ -244,11 +245,31 @@ def match_rivers_to_gauges(drain: gpd.GeoDataFramev, new_gauges: pd.DataFrame,
                       assigned IDs from drain.
     """
     new_gauges['nga_id'] = ''
+    if magnitude_col is None:
+        drain['Magnitude'] = 0
+        magnitude_col = 'Magnitude'
     for i in range(len(new_gauges)):
         gauge = new_gauges.iloc[i]
         gauge_geom = Point(gauge[lon_col], gauge[lat_col])
         drain['distance'] = drain.distance(gauge_geom)
         nearest_rivs = drain.loc[drain[new_strm_ord] != 1].sort_values(by='distance').head(10)
+        order_counts = nearest_rivs.groupby(new_strm_ord).agg(
+            Count=(new_strm_ord, 'size')).sort_values('Count', ascending=False).reset_index()
+        gauge_geom = Point(gauge[lon_col], gauge[lat_col])
+
+        # Buffer streams to narrow down distances to be calculated
+        gauge_buffer = gpd.GeoDataFrame({'geometry': [gauge_geom]}, crs='EPSG:4326').geometry.buffer(0.25)
+        drain_filtered = gpd.sjoin(drain, gauge_buffer.to_frame(), how='inner', op='intersects')[drain.columns]
+
+        if drain_filtered.empty:
+            print(f'Gauge of index {gauge.name} not close enough to any rivers')
+            new_gauges.loc[new_gauges.index[i], 'nga_id'] = '-1'
+            continue
+        drain_filtered['distance'] = drain_filtered.distance(gauge_geom)
+        nearest_rivs = drain_filtered.loc[drain_filtered[new_strm_ord] != 1].sort_values(by='distance').head(10)
+        if nearest_rivs.empty:
+            new_gauges.loc[new_gauges.index[i], 'nga_id'] = '-1'
+            continue
         order_counts = nearest_rivs.groupby(new_strm_ord).agg(
             Count=(new_strm_ord, 'size')).sort_values('Count', ascending=False).reset_index()
         if not order_counts.empty:
@@ -259,8 +280,10 @@ def match_rivers_to_gauges(drain: gpd.GeoDataFramev, new_gauges: pd.DataFrame,
                                 nearest_rivs[magnitude_col] * mag_wt + dist_wt / nearest_rivs['distance']
         nearest_riv = nearest_rivs.loc[nearest_rivs['score'] == nearest_rivs['score'].max()]
 
-        new_gauges.loc[new_gauges.index[i], 'nga_id'] = nearest_riv[new_strm_id]
+        # new_gauges.loc[new_gauges.index[i], 'nga_id'] = nearest_riv[new_strm_id]
         # if (nearest_riv[new_strm_id] != gauge['nga_id']).iloc[0]:
+        new_gauges.loc[new_gauges.index[i], 'nga_id'] = str(nearest_riv[new_strm_id].values[0])
+        # if (nearest_riv[new_strmid] != gauge['nga_id']).iloc[0]:
         #     changed_count += 1
         #     gauge['nga_id'] = nearest_riv[new_strm_id].values[0]
         #     gauge = gauge.to_frame().T
@@ -268,6 +291,7 @@ def match_rivers_to_gauges(drain: gpd.GeoDataFramev, new_gauges: pd.DataFrame,
         #         changed_df = gauge
         #     else:
         #         changed_df = pd.concat([changed_df, gauge], axis=0).reset_index(drop=True)
+    new_gauges['nga_id'] = new_gauges['nga_id'].apply(lambda x: x.split('.')[0])
     return new_gauges
 
 

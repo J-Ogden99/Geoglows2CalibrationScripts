@@ -7,7 +7,7 @@ import pandas as pd
 from matchPoints import match_new_to_old_rivers, match_rivers_to_gauges
 
 pd.set_option('display.max_columns', 20)
-gauge_table = pd.read_csv('gauge_table_filters.csv')
+gauge_table = pd.read_csv('missing_south_america.csv')
 total_rows = int(5.6e6)
 chunk_size = int(5e5)
 region_map = {
@@ -48,17 +48,19 @@ out_tbl = pd.DataFrame()
 #         out_tbl.to_csv('gauge_assignments/whole_world_gauge_assign.csv')
 #     del df
 
-nga_files = glob(f'tdxhydro/vpu_*/*.gpkg')
+nga_files = glob(f'global_streams_simplified.geoparquet')
+# nga_files = glob(f'tdxhydro/vpu_*/*.gpkg')
 for file in nga_files:
-    nga = gpd.read_file(file)
+    nga = gpd.read_parquet(file)
+    nga = nga.set_crs('EPSG:4326')
     print(f'Assigning streams from file: {file} of length: {nga.shape[0]}')
     if out_tbl.empty:
-        out_tbl = match_rivers_to_gauges(nga, gauge_table, new_strmid='TDXHydroLinkNo')
+        out_tbl = match_rivers_to_gauges(nga, gauge_table, magnitude_col=None)
     else:
-        assigned = match_rivers_to_gauges(nga, gauge_table, new_strmid='TDXHydroLinkNo')
+        assigned = match_rivers_to_gauges(nga, gauge_table, magnitude_col=None)
         if assigned is not None:
             out_tbl = pd.concat([out_tbl, assigned],
                                 axis=0).reset_index(drop=True)
         print(out_tbl)
-    out_tbl.to_csv('gauge_assignments/whole_world_gauge_assign.csv')
+    out_tbl.to_csv('gauge_assignments/south_america_geoglows_fixed.csv')
 

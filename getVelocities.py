@@ -31,6 +31,8 @@ def df_from_tab_separated(txt: str):
     rows = data.strip().split('\n')[2:]
     column_names = header.split('\t')
     data_rows = [row.replace('\r', '').split('\t') for row in rows]
+    if len(data_rows[0]) < len(column_names):
+        data_rows = [d + ['' for i in range(len(column_names) - len(data_rows[0]))] for d in data_rows]
     df = pd.DataFrame(data_rows, columns=column_names)
     return df
 
