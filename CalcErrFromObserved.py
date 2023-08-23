@@ -18,7 +18,8 @@ STATS_NAMES = ['Mean Error', 'Root Mean Squared Error', 'Kling-Gupta Efficiency'
 
 
 def calc_error_metrics(gauge_data: pd.DataFrame, flow_col: str = 'Qout', **model_timeseries: pd.DataFrame):
-    """Calculate error metrics for n number of model time series compared to gauge data.
+    """Calculate error metrics for n number of model time series compared to gauge data. Takes named dataframes
+       as keyword arguments and uses the names given to identify stats for the dataframes in the index of the output df
 
     Args:
         gauge_data (pd.DataFrame): The gauge data time series.
