@@ -233,7 +233,7 @@ def match_rivers_to_gauges(drain: gpd.GeoDataFrame, new_gauges: pd.DataFrame,
         new_gauges (pd.DataFrame): Gauges with an id, lat, and lon column (though id isn't directly used)
         new_strm_id (str, optional): Column name for the stream ID from drain. Defaults to 'TDXHydroLinkNo'.
         new_strm_ord (str, optional): Column name for the stream order from drain. Defaults to 'strmOrder'.
-        magnitude_col (str, optional): Column name for the magnitude (shreve stream order). Defaults to 'Magnitude'.
+        magnitude_col (str, optional): Column name for the magnitude (Shreve stream order). Defaults to 'Magnitude'.
         dist_wt (int, optional): Amount to emphasize inverse distance of river to gauge for scoring.
                                  Should combine with mag_wt to add up to 1. Defaults to 1.
         mag_wt (int, optional): Amount to emphasize magnitude of river in scoring. Defaults to 0.
