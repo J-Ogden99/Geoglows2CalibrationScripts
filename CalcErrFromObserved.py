@@ -15,7 +15,7 @@ V2_LOOKUP_TBL = 'master_table.parquet'
 GAUGE_DIR = '/Users/joshogden/Downloads/ObservedDischarge-selected'
 
 # Must match function names in HydroErr/Hydrostats
-STATS_LIST = ['me', 'rmse', 'kge', 'r_squared', 'nse', 'mape']
+STATS_LIST = ['me', 'rmse', 'kge_2012', 'r_squared', 'nse', 'mape']
 # Used to rename stat columns
 STATS_NAMES = ['Mean Error', 'Root Mean Squared Error', 'Kling-Gupta Efficiency', 'R^2', 'Nash-Sutcliffe Efficiency',
                'Mean Absolute Percent Error']
@@ -122,22 +122,36 @@ def calc_metrics_on_all_gauges(assigned_gauges: pd.DataFrame):
             v1_hist_sim = get_vpu_nc(os.path.join(V1_DIR, v1_region)).sel(rivid=v1_id, nv=0) \
                 .to_dataframe().reset_index()
         if v2_vpu_code != old_v2_vpu_code:
-            if not os.path.exists(os.path.join(V2_DIR, v2_vpu_code)):
+            if not os.path.exists(os.path.join(V2_DIR, str(v2_vpu_code))):
                 print(f'Model data for V2 vpu {v2_vpu_code} not found')
                 continue
-            v2_hist_sim = get_vpu_nc(os.path.join(V2_DIR, v2_vpu_code)).sel(rivid=v2_id, nv=0) \
+            v2_hist_sim = get_vpu_nc(os.path.join(V2_DIR, str(v2_vpu_code))).sel(rivid=v2_id, nv=0) \
                 .to_dataframe().reset_index()
         old_v1_region = v1_region
         old_v2_vpu_code = v2_vpu_code
 
+        # Find file with the gauge_id (may need to improve to use the source name if a code is found to not be unique)
         gauge_path = find_file_recursively(GAUGE_DIR, f'{gauge_id}.csv')
         if not gauge_path:
-            raise FileNotFoundError('Observed data for gauge not found')
+            print(f'Observed data for gauge {gauge_row[gid_col]} not found')
+            continue
         gauge_timeseries = pd.read_csv(gauge_path)
+        if 'streamflow' not in gauge_timeseries.columns[1].lower():
+            print(f'Data for gauge {gauge_row[gid_col]} not streamflow. Skipping...')
+            continue
+
+        # Preprocess data for error calculation
         gauge_timeseries = gauge_timeseries.rename(columns={gauge_timeseries.columns[1]: "Qout"})
         gauge_timeseries[gauge_timeseries.columns[0]] = pd.to_datetime(gauge_timeseries[gauge_timeseries.columns[0]])
-        v1_hist_sim = v1_hist_sim.loc[v1_hist_sim['time'].isin(gauge_timeseries.iloc[:, 0])]
-        v2_hist_sim = v2_hist_sim.loc[v2_hist_sim['time'].isin(gauge_timeseries.iloc[:, 0])]
+
+        # Pare gauge data down to what both historical sims have, then fil
+        for sim in [v1_hist_sim, v2_hist_sim]:
+            sim.rename(columns={'time': 'sim_time'}, inplace=True)
+            gauge_timeseries = gauge_timeseries.merge(
+                sim['sim_time'], left_on=gauge_timeseries.columns[0], right_on='sim_time', how='inner') \
+                .reset_index(drop=True).drop('sim_time', axis=1)
+        v1_hist_sim = v1_hist_sim.loc[v1_hist_sim['sim_time'].isin(gauge_timeseries.iloc[:, 0])]
+        v2_hist_sim = v2_hist_sim.loc[v2_hist_sim['sim_time'].isin(gauge_timeseries.iloc[:, 0])]
 
         # Get metrics dataframe
         metrics = calc_error_metrics(gauge_timeseries, geoglows_v1=v1_hist_sim, geoglows_v2=v2_hist_sim)
@@ -148,6 +162,8 @@ def calc_metrics_on_all_gauges(assigned_gauges: pd.DataFrame):
         # Combine index and column names to get a column for each stat and for each model run
         metrics.columns = [f'{index} - {column}' for index, column in metrics.columns]
 
-        out_df.loc[gauge_row.index, metrics.columns] = metrics
+        if not metrics.columns.isin(out_df.columns).all():
+            out_df[metrics.columns] = -1
+        out_df.loc[out_df.index[i], metrics.columns] = metrics.values
 
     return out_df
