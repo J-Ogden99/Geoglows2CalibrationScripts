@@ -51,6 +51,22 @@ def calc_error_metrics(gauge_data: pd.DataFrame, flow_col: str = 'Qout', **model
     return metrics_df.rename(columns={short: long for short, long in zip(STATS_LIST, STATS_NAMES)})
 
 
+def find_file_recursively(folder_path, target_filename):
+    """Recursively search for a file with a specific name in a folder and its subdirectories.
+
+    Args:
+        folder_path (str): The path of the folder to start the search.
+        target_filename (str): The name of the file to search for.
+
+    Returns:
+        str or None: The full path of the found file, or None if not found.
+    """
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            if file == target_filename:
+                return os.path.join(root, file)
+    return None
+
 def get_vpu_nc(vpu_dir):
     """Open and return a NetCDF dataset corresponding to a region or vpu from the specified directory.
 
@@ -91,7 +107,7 @@ def calc_metrics_on_all_gauges(assigned_gauges: pd.DataFrame):
 
     # Calculate error metrics for each gauge
     for i, gauge_row in assigned_gauges.iterrows():
-        gauge_id = gauge_row[gid_col].split('_')
+        gauge_id = gauge_row[gid_col].split('_')[-1]
         v1_id = int(gauge_row[v1_id_col])
         v2_id = int(gauge_row[v2_id_col])
         v1_region = gauge_row['v1_region']
@@ -99,10 +115,10 @@ def calc_metrics_on_all_gauges(assigned_gauges: pd.DataFrame):
 
         # Only read the historical simulation data if the gauge is in a different region/vpu than the last one
         if v1_region != old_v1_region:
-            print(v1_region)
             if not os.path.exists(os.path.join(V1_DIR, v1_region)):
                 print(f'Model data for V1 region {v1_region} not found')
                 continue
+            print(v1_region)
             v1_hist_sim = get_vpu_nc(os.path.join(V1_DIR, v1_region)).sel(rivid=v1_id, nv=0) \
                 .to_dataframe().reset_index()
         if v2_vpu_code != old_v2_vpu_code:
@@ -114,12 +130,14 @@ def calc_metrics_on_all_gauges(assigned_gauges: pd.DataFrame):
         old_v1_region = v1_region
         old_v2_vpu_code = v2_vpu_code
 
-        gauge_path = glob(os.path.join(GAUGE_DIR, f'*/*/{gauge_id}.csv'))
-        if not gauge_path or len(gauge_path) == 0:
+        gauge_path = find_file_recursively(GAUGE_DIR, f'{gauge_id}.csv')
+        if not gauge_path:
             raise FileNotFoundError('Observed data for gauge not found')
-        else:
-            gauge_path = gauge_path[0]
         gauge_timeseries = pd.read_csv(gauge_path)
+        gauge_timeseries = gauge_timeseries.rename(columns={gauge_timeseries.columns[1]: "Qout"})
+        gauge_timeseries[gauge_timeseries.columns[0]] = pd.to_datetime(gauge_timeseries[gauge_timeseries.columns[0]])
+        v1_hist_sim = v1_hist_sim.loc[v1_hist_sim['time'].isin(gauge_timeseries.iloc[:, 0])]
+        v2_hist_sim = v2_hist_sim.loc[v2_hist_sim['time'].isin(gauge_timeseries.iloc[:, 0])]
 
         # Get metrics dataframe
         metrics = calc_error_metrics(gauge_timeseries, geoglows_v1=v1_hist_sim, geoglows_v2=v2_hist_sim)
