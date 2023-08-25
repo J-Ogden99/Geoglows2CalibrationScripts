@@ -265,19 +265,23 @@ def match_rivers_to_gauges(drain: gpd.GeoDataFrame, new_gauges: pd.DataFrame,
             print(f'Gauge of index {gauge.name} not close enough to any rivers')
             new_gauges.loc[new_gauges.index[i], 'nga_id'] = '-1'
             continue
+
+        # Calculate distances, get 10 closest
         drain_filtered['distance'] = drain_filtered.distance(gauge_geom)
         nearest_rivs = drain_filtered.loc[drain_filtered[new_strm_ord] != 1].sort_values(by='distance').head(10)
         if nearest_rivs.empty:
+            # Set to empty value if not close enough to any
             new_gauges.loc[new_gauges.index[i], 'nga_id'] = '-1'
             continue
+
+        # Count rivers of a given stream order, score by distance and prevalence of stream order among other rivers
         order_counts = nearest_rivs.groupby(new_strm_ord).agg(
             Count=(new_strm_ord, 'size')).sort_values('Count', ascending=False).reset_index()
         if not order_counts.empty:
             max_order = order_counts.loc[order_counts[new_strm_ord] != 1, new_strm_ord].iloc[0]
-        # Try strmOrder * # of occurences of that stream order? or 0 if it's 1? or just the number of occurences of the stream order without multplying the number?
         nearest_rivs['score'] = nearest_rivs[new_strm_ord].apply(
             lambda x: order_counts.loc[order_counts[new_strm_ord] == x, 'Count'].values[0]) + \
-                                nearest_rivs[magnitude_col] * mag_wt + dist_wt / nearest_rivs['distance']
+            nearest_rivs[magnitude_col] * mag_wt + dist_wt / nearest_rivs['distance']
         nearest_riv = nearest_rivs.loc[nearest_rivs['score'] == nearest_rivs['score'].max()]
 
         # new_gauges.loc[new_gauges.index[i], 'nga_id'] = nearest_riv[new_strm_id]

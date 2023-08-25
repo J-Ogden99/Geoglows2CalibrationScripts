@@ -261,9 +261,11 @@ for site_no, group in q_v.groupby('site_no'):
 
 q_v_rel = pd.DataFrame(q_v_rel)
 # read_nhd = True
+# Match points to TDXHydro Network instead of NHD to obtain hydrography attributes
 if not read_nhd:
-    if not os.path.exists('assigned_fixed.csv'):
-        if not os.path.exists('site_locations.csv'):
+    if not os.path.exists('assigned_usgs_gauges.csv'):
+        if not os.path.exists('usgs_vel_site_locations.csv'):
+            # Get site information for each site and extract lat/lon data
             site_info_url_pattern = f'https://waterdata.usgs.gov/nwis/inventory?agency_code=USGS&format=rdb&site_no='
 
             site_locations_df = pd.DataFrame()
@@ -287,11 +289,13 @@ if not read_nhd:
                                                    pd.DataFrame({'site_no': site_no, 'lat_gauge': lat, 'lon_gauge': lon}, index=[0])
                                                    ]).reset_index(drop=True)
             site_locations_df['lon_gauge'] = -site_locations_df['lon_gauge']
-            site_locations_df.to_csv('site_locations.csv', index=False)
+            site_locations_df.to_csv('usgs_vel_site_locations.csv', index=False)
         else:
-            site_locations_df = pd.read_csv('site_locations.csv', dtype={'site_no': str})
-
+            site_locations_df = pd.read_csv('usgs_vel_site_locations.csv', dtype={'site_no': str})
+        # Match gauge points to stream network
         if not os.path.exists('matched_velocity_gauges.csv'):
+            # Get all streams together rather than running workflow on each vpu separately.
+            # More memory-intensive but faster
             north_america_df = pd.DataFrame()
             for vpu in glob('tdxhydro/vpu_700/vpu_*_streams.gpkg'):
                 print(f'Reading {vpu}')
@@ -305,6 +309,8 @@ if not read_nhd:
             new_gauges = match_rivers_to_gauges(north_america_df, site_locations_df)
             new_gauges.to_csv('matched_velocity_gauges.csv', index=False)
 
+            # Add slope and upstream area to gauge attributes if matching has just been done otherwise it goes straight
+            # Into the numpy array
             new_gauges['nga_id'] = new_gauges['nga_id'].astype(int)
             new_gauges['site_no'] = new_gauges['site_no'].astype(int)
             stats['site_no'] = stats['site_no'].astype(int)
@@ -320,7 +326,7 @@ if not read_nhd:
             data_arr = new_gauges[['USContArea', 'Slope', 'v_mean']].values
 
     else:
-        new_gauges = pd.read_csv('assigned_fixed.csv')
+        new_gauges = pd.read_csv('assigned_usgs_gauges.csv')
         data_arr = new_gauges[['USContArea', 'Slope', 'v_mean']].values
 else:
     nhd_dir = 'NHD_VAA'
@@ -392,6 +398,7 @@ else:
         else:
             data_arr = np.concatenate((data_arr, df.to_numpy()), axis=0)
 
+# --------- Regression -----------
 x_attrs = ['TotDASqKM', 'SLOPE']
 y_attr = 'v_mean'
 
@@ -399,10 +406,7 @@ y_attr = 'v_mean'
 pipe = make_pipeline(linear_model.LinearRegression())
 rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
 
-# Remove outliers and normalize
-# data_arr = remove_outliers(data_arr)
-# for i in range(data_arr.shape[1] - 1):
-#     data_arr[:, i] = data_arr[:, i] / data_arr[:, i].mean()
+
 X = data_arr[:, :-2]
 y = data_arr[:, -1]
 # X = X ** 1/3
@@ -426,7 +430,8 @@ y_predicted = pipe.predict(X)
 y_forest = rf_model.predict(X)
 
 # Create subplots for the independent variables, lrm
-fig, axes = plt.subplots(1, X.shape[1], figsize=(12, 5))
+fig, axes = plt.subplots(1, X.shape[1], figsize=(6, 3))
+dpi = 400
 
 lrm = pipe.named_steps['linearregression']
 print('Parameters:')
@@ -437,11 +442,10 @@ y_label = 'Mean Velocity (cfs)'
 for i in range(X.shape[1]):
     x = X[:, i]
     x_range = np.linspace(x.min(), x.max(), 100)
-    y_pred = np.power(10, lrm.coef_[i] * x_range + lrm.intercept_)
-
+    y_pred = np.power(np.exp(1), lrm.coef_[i] * x_range + lrm.intercept_)
     # Plot the independent variable against the dependent variable
     if X.shape[1] > 1:
-        axes[i].scatter(x, y)
+        axes.scatter(x, np.exp(y))
         axes[i].set_xlabel(x_labels[i])
         axes[i].set_ylabel(y_label)
         axes[i].plot(x_range, y_pred, color='red')
@@ -449,7 +453,7 @@ for i in range(X.shape[1]):
         # equation_text = f'y = {lrm.coef_[i]:.4f} * x + {lrm.intercept_:.4f}'
         # axes[i].annotate(equation_text, xy=(0.5, 0.25), xycoords='axes fraction', fontsize=12, color='red')
     else:
-        axes.scatter(x, np.power(10, y))
+        axes.scatter(x, np.exp(y))
         axes.set_xlabel(x_labels[i])
         axes.set_ylabel(y_label)
         axes.plot(x_range, y_pred, color='red')
@@ -464,7 +468,7 @@ plt.tight_layout()
 plt.title('Velocity Compared with Upstream Area')
 plt.subplots_adjust(top=0.9)
 
-plt.savefig('vel-da.png', format='png')
+plt.savefig('vel-da.png', format='png', dpi=dpi, bbox_inches='tight')
 plt.show()
 
 
@@ -494,9 +498,9 @@ results.to_csv('metrics.csv', index=False)
 # r_squared_baseline = r2_score(y_test, baseline_predictions)
 
 # Create subplots for the independent variables, random forest
-x_labels = ['Log Drainage Area (sq km)']
-y_label = 'Log Mean Velocity (cfs)'
-fig, axes = plt.subplots(1, X.shape[1], figsize=(12, 5))
+x_labels = ['Ln Drainage Area (sq km)']
+y_label = 'Ln Mean Velocity (cfs)'
+fig, axes = plt.subplots(1, X.shape[1], figsize=(6, 3))
 lrm = pipe.named_steps['linearregression']
 for i in range(X.shape[1]):
     x = X[:, i]
@@ -504,7 +508,6 @@ for i in range(X.shape[1]):
     y_pred = lrm.coef_[i] * x_range + lrm.intercept_
     # Plot the independent variable against the dependent variable
     if X.shape[1] > 1:
-        axes[i].scatter(x, y)
         axes[i].set_xlabel(x_labels[i])
         axes[i].set_ylabel(y_label)
         axes[i].plot(x_range, y_pred, color='red')
@@ -524,11 +527,60 @@ for i in range(X.shape[1]):
 plt.tight_layout()
 
 # Show the plot
-plt.suptitle('Velocity Compared with Drainage Area (log-transformed)')
+plt.suptitle('Velocity vs. Drainage Area (log-transformed)')
 plt.subplots_adjust(top=0.9)
-plt.savefig('vel-da-log.png', format='png')
+plt.savefig('vel-da-log.png', format='png', dpi=dpi, bbox_inches='tight')
 plt.show()
 
+
+# Create the figure and subplots
+fig, axes = plt.subplots(2, X.shape[1], figsize=(6 * X.shape[1], 6))  # 2 rows, 1 column
+
+for i in range(X.shape[1]):
+    x = X[:, i]
+    x_range = np.linspace(x.min(), x.max(), 100)
+    y_pred = np.power(np.exp(1), lrm.coef_[i] * x_range + lrm.intercept_)
+    y_pred_log = lrm.coef_[i] * x_range + lrm.intercept_
+    equation_text = f'y = {lrm.coef_[i]:.4f}x \u2013 {abs(lrm.intercept_):.4f}'
+    if X.shape[1] > 1:
+        # Linear Regression Plot
+        axes[0, i].scatter(x, np.exp(y), color='blue')
+        axes[0, i].plot(x_range, y_pred, color='red')
+        # axes[0, i].set_xlabel(x_labels[i])
+        axes[0, i].set_xlabel(x_labels[i].replace('Ln ', ''))
+        axes[0, i].set_ylabel(y_label.replace('Ln ', ''))
+        axes[0, i].set_title('Velocity vs. Drainage Area')
+
+        # Log-Linear Regression Plot
+        axes[1, i].scatter(x, y, color='green')  # Use np.log for the dependent variable
+        axes[1, i].plot(x_range, y_pred_log, color='red')
+        axes[1, i].set_xlabel(x_labels[i])
+        axes[1, i].set_ylabel(y_label)
+        axes[1, i].set_title('Velocity vs. Drainage Area (natural-log-transformed)')
+        axes[1, i].annotate(equation_text, xy=(0.5, 0.25), xycoords='axes fraction', fontsize=12, color='red')
+    else:
+        # Linear Regression Plot
+        axes[0].scatter(x, np.exp(y), color='blue')
+        axes[0].plot(x_range, y_pred, color='red')
+        # axes[0, i].set_xlabel(x_labels[i])
+        axes[0].set_xlabel(x_labels[i].replace('Ln ', ''))
+        axes[0].set_ylabel(y_label.replace('Ln ', ''))
+        axes[0].set_title('Velocity vs. Drainage Area')
+
+        # Log-Linear Regression Plot
+        axes[1].scatter(x, y, color='green')  # Use np.log for the dependent variable
+        axes[1].plot(x_range, y_pred_log, color='red')
+        axes[1].set_xlabel(x_labels[i])
+        axes[1].set_ylabel(y_label)
+        axes[1].set_title('Velocity vs. Drainage Area (natural-log-transformed)')
+        axes[1].annotate(equation_text, xy=(0.5, 0.25), xycoords='axes fraction', fontsize=12, color='red')
+
+# Adjust spacing between subplots
+plt.tight_layout()
+
+# Save or show the plot
+plt.savefig('linear_vs_loglinear.png', format='png', dpi=dpi, bbox_inches='tight')
+plt.show()
 
 
 # Scale attributes
