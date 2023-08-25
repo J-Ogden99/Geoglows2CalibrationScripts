@@ -9,8 +9,8 @@ import xarray as xr
 from geoglows.streamflow import reach_to_region
 import HydroErr.HydroErr as Hs
 
-V1_DIR = 'geoglows1/outputs/'
-V2_DIR = 'geoglows2/outputs/'
+V1_DIR = '/Users/joshogden/Downloads/'
+V2_DIR = '/Users/joshogden/Downloads/'
 V2_LOOKUP_TBL = 'master_table.parquet'
 GAUGE_DIR = '/Users/joshogden/Downloads/ObservedDischarge-selected'
 
@@ -87,12 +87,11 @@ def calc_metrics_on_all_gauges(assigned_gauges: pd.DataFrame):
 
     # Make a copy in which to write the stats columns
     out_df = assigned_gauges.copy()
-    old_v1_region, old_v2_vpu_code = ''
+    old_v1_region, old_v2_vpu_code = ('', '')
 
     # Calculate error metrics for each gauge
     for i, gauge_row in assigned_gauges.iterrows():
-        gauge_id = gauge_row[gid_col]
-        print(gauge_id)
+        gauge_id = gauge_row[gid_col].split('_')
         v1_id = int(gauge_row[v1_id_col])
         v2_id = int(gauge_row[v2_id_col])
         v1_region = gauge_row['v1_region']
@@ -100,13 +99,16 @@ def calc_metrics_on_all_gauges(assigned_gauges: pd.DataFrame):
 
         # Only read the historical simulation data if the gauge is in a different region/vpu than the last one
         if v1_region != old_v1_region:
+            print(v1_region)
             if not os.path.exists(os.path.join(V1_DIR, v1_region)):
-                raise FileNotFoundError('Model data for V1 not found')
+                print(f'Model data for V1 region {v1_region} not found')
+                continue
             v1_hist_sim = get_vpu_nc(os.path.join(V1_DIR, v1_region)).sel(rivid=v1_id, nv=0) \
                 .to_dataframe().reset_index()
         if v2_vpu_code != old_v2_vpu_code:
             if not os.path.exists(os.path.join(V2_DIR, v2_vpu_code)):
-                raise FileNotFoundError('Model data for V2 not found')
+                print(f'Model data for V2 vpu {v2_vpu_code} not found')
+                continue
             v2_hist_sim = get_vpu_nc(os.path.join(V2_DIR, v2_vpu_code)).sel(rivid=v2_id, nv=0) \
                 .to_dataframe().reset_index()
         old_v1_region = v1_region
