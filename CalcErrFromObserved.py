@@ -89,6 +89,7 @@ def calc_metrics_on_all_gauges(assigned_gauges: pd.DataFrame):
     out_df = assigned_gauges.copy()
     old_v1_region, old_v2_vpu_code = ''
 
+    # Calculate error metrics for each gauge
     for i, gauge_row in assigned_gauges.iterrows():
         gauge_id = gauge_row[gid_col]
         print(gauge_id)
